@@ -1,249 +1,130 @@
-import streamlit as st
-import pandas as pd
+# S2.1: Open Sublime text editor, create a new Python file, copy the following code in it and save it as 'glass_type_app.py'.
+# You have already created this ML model in ones of the previous classes.
+
+# Importing the necessary Python modules.
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
-import altair as alt
-import time
-import zipfile
+import pandas as pd
+import streamlit as st
+import seaborn as sns
+import matplotlib.pyplot as plt
+import plotly.express as pc
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import precision_score, recall_score,plot_confusion_matrix
 
-# Page title
-st.set_page_config(page_title='ML Model Building', page_icon='🤖')
-st.title('🤖 ML Model Building')
+# ML classifier Python modules
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 
-with st.expander('About this app'):
-  st.markdown('**What can this app do?**')
-  st.info('This app allow users to build a machine learning (ML) model in an end-to-end workflow. Particularly, this encompasses data upload, data pre-processing, ML model building and post-model analysis.')
+# Loading the dataset.
+def preiction (m,RI, Na, Mg, Al, Si, K, Ca, Ba,Fe):
+  glass_type=m.predict([[RI, Na, Mg, Al, Si, K, Ca, Ba,Fe]])
+  if glass_type==1:return "building windows float processed"
+  elif glass_type == 2:return "building windows non float processed"
+  elif glass_type == 3:return "vehicle windows float processed"
+  elif glass_type == 4:return "vehicle windows non float processed"
+  elif glass_type == 5:return "containers"
+  elif glass_type == 6:return "tableware"
+  else: return "headlamp"
+def load_data():
+    file_path = "glass-types.csv"
+    df = pd.read_csv(file_path, header = None)
+    # Dropping the 0th column as it contains only the serial numbers.
+    df.drop(columns = 0, inplace = True)
+    column_headers = ['RI', 'Na', 'Mg', 'Al', 'Si', 'K', 'Ca', 'Ba', 'Fe', 'GlassType']
+    columns_dict = {}
+    # Renaming columns with suitable column headers.
+    for i in df.columns:
+        columns_dict[i] = column_headers[i - 1]
+        # Rename the columns.
+        df.rename(columns_dict, axis = 1, inplace = True)
+    return df
+st.title('Glass type predictor')
+sliders=[]
 
-  st.markdown('**How to use the app?**')
-  st.warning('To engage with the app, go to the sidebar and 1. Select a data set and 2. Adjust the model parameters by adjusting the various slider widgets. As a result, this would initiate the ML model building process, display the model results as well as allowing users to download the generated models and accompanying data.')
+glass_df = load_data()
+for magicmagicmagic in glass_df.columns[0:-1]:
+    sliders.append(st.sidebar.slider(magicmagicmagic,float(glass_df[magicmagicmagic].min()),float(glass_df[magicmagicmagic].max())))
+# Creating the features data-frame holding all the columns except the last column.
+X = glass_df.iloc[:, :-1]
 
-  st.markdown('**Under the hood**')
-  st.markdown('Data sets:')
-  st.code('''- Drug solubility data set
-  ''', language='markdown')
-  
-  st.markdown('Libraries used:')
-  st.code('''- Pandas for data wrangling
-- Scikit-learn for building a machine learning model
-- Altair for chart creation
-- Streamlit for user interface
-  ''', language='markdown')
+# Creating the target series that holds last column.
+y = glass_df['GlassType']
+st.set_option('deprecation.showPyplotGlobalUse', False)
 
 
-# Sidebar for accepting input parameters
-with st.sidebar:
-    # Load data
-    st.header('1.1. Input data')
-
-    st.markdown('**1. Use custom data**')
-    uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file, index_col=False)
-      
-    # Download example data
-    @st.cache_data
-    def convert_df(input_df):
-        return input_df.to_csv(index=False).encode('utf-8')
-    example_csv = pd.read_csv('https://raw.githubusercontent.com/dataprofessor/data/master/delaney_solubility_with_descriptors.csv')
-    csv = convert_df(example_csv)
-    st.download_button(
-        label="Download example CSV",
-        data=csv,
-        file_name='delaney_solubility_with_descriptors.csv',
-        mime='text/csv',
-    )
-
-    # Select example data
-    st.markdown('**1.2. Use example data**')
-    example_data = st.toggle('Load example data')
-    if example_data:
-        df = pd.read_csv('https://raw.githubusercontent.com/dataprofessor/data/master/delaney_solubility_with_descriptors.csv')
-
-    st.header('2. Set Parameters')
-    parameter_split_size = st.slider('Data split ratio (% for Training Set)', 10, 90, 80, 5)
-
-    st.subheader('2.1. Learning Parameters')
-    with st.expander('See parameters'):
-        parameter_n_estimators = st.slider('Number of estimators (n_estimators)', 0, 1000, 100, 100)
-        parameter_max_features = st.select_slider('Max features (max_features)', options=['all', 'sqrt', 'log2'])
-        parameter_min_samples_split = st.slider('Minimum number of samples required to split an internal node (min_samples_split)', 2, 10, 2, 1)
-        parameter_min_samples_leaf = st.slider('Minimum number of samples required to be at a leaf node (min_samples_leaf)', 1, 10, 2, 1)
-
-    st.subheader('2.2. General Parameters')
-    with st.expander('See parameters', expanded=False):
-        parameter_random_state = st.slider('Seed number (random_state)', 0, 1000, 42, 1)
-        parameter_criterion = st.select_slider('Performance measure (criterion)', options=['squared_error', 'absolute_error', 'friedman_mse'])
-        parameter_bootstrap = st.select_slider('Bootstrap samples when building trees (bootstrap)', options=[True, False])
-        parameter_oob_score = st.select_slider('Whether to use out-of-bag samples to estimate the R^2 on unseen data (oob_score)', options=[False, True])
-
-    sleep_time = st.slider('Sleep time', 0, 3, 0)
-
-# Initiate the model building process
-if uploaded_file or example_data: 
-    with st.status("Running ...", expanded=True) as status:
-    
-        st.write("Loading data ...")
-        time.sleep(sleep_time)
-
-        st.write("Preparing data ...")
-        time.sleep(sleep_time)
-        X = df.iloc[:,:-1]
-        y = df.iloc[:,-1]
-            
-        st.write("Splitting data ...")
-        time.sleep(sleep_time)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=(100-parameter_split_size)/100, random_state=parameter_random_state)
-    
-        st.write("Model training ...")
-        time.sleep(sleep_time)
-
-        if parameter_max_features == 'all':
-            parameter_max_features = None
-            parameter_max_features_metric = X.shape[1]
-        
-        rf = RandomForestRegressor(
-                n_estimators=parameter_n_estimators,
-                max_features=parameter_max_features,
-                min_samples_split=parameter_min_samples_split,
-                min_samples_leaf=parameter_min_samples_leaf,
-                random_state=parameter_random_state,
-                criterion=parameter_criterion,
-                bootstrap=parameter_bootstrap,
-                oob_score=parameter_oob_score)
-        rf.fit(X_train, y_train)
-        
-        st.write("Applying model to make predictions ...")
-        time.sleep(sleep_time)
-        y_train_pred = rf.predict(X_train)
-        y_test_pred = rf.predict(X_test)
-            
-        st.write("Evaluating performance metrics ...")
-        time.sleep(sleep_time)
-        train_mse = mean_squared_error(y_train, y_train_pred)
-        train_r2 = r2_score(y_train, y_train_pred)
-        test_mse = mean_squared_error(y_test, y_test_pred)
-        test_r2 = r2_score(y_test, y_test_pred)
-        
-        st.write("Displaying performance metrics ...")
-        time.sleep(sleep_time)
-        parameter_criterion_string = ' '.join([x.capitalize() for x in parameter_criterion.split('_')])
-        #if 'Mse' in parameter_criterion_string:
-        #    parameter_criterion_string = parameter_criterion_string.replace('Mse', 'MSE')
-        rf_results = pd.DataFrame(['Random forest', train_mse, train_r2, test_mse, test_r2]).transpose()
-        rf_results.columns = ['Method', f'Training {parameter_criterion_string}', 'Training R2', f'Test {parameter_criterion_string}', 'Test R2']
-        # Convert objects to numerics
-        for col in rf_results.columns:
-            rf_results[col] = pd.to_numeric(rf_results[col], errors='ignore')
-        # Round to 3 digits
-        rf_results = rf_results.round(3)
-        
-    status.update(label="Status", state="complete", expanded=False)
-
-    # Display data info
-    st.header('Input data', divider='rainbow')
-    col = st.columns(4)
-    col[0].metric(label="No. of samples", value=X.shape[0], delta="")
-    col[1].metric(label="No. of X variables", value=X.shape[1], delta="")
-    col[2].metric(label="No. of Training samples", value=X_train.shape[0], delta="")
-    col[3].metric(label="No. of Test samples", value=X_test.shape[0], delta="")
-    
-    with st.expander('Initial dataset', expanded=True):
-        st.dataframe(df, height=210, use_container_width=True)
-    with st.expander('Train split', expanded=False):
-        train_col = st.columns((3,1))
-        with train_col[0]:
-            st.markdown('**X**')
-            st.dataframe(X_train, height=210, hide_index=True, use_container_width=True)
-        with train_col[1]:
-            st.markdown('**y**')
-            st.dataframe(y_train, height=210, hide_index=True, use_container_width=True)
-    with st.expander('Test split', expanded=False):
-        test_col = st.columns((3,1))
-        with test_col[0]:
-            st.markdown('**X**')
-            st.dataframe(X_test, height=210, hide_index=True, use_container_width=True)
-        with test_col[1]:
-            st.markdown('**y**')
-            st.dataframe(y_test, height=210, hide_index=True, use_container_width=True)
-
-    # Zip dataset files
-    df.to_csv('dataset.csv', index=False)
-    X_train.to_csv('X_train.csv', index=False)
-    y_train.to_csv('y_train.csv', index=False)
-    X_test.to_csv('X_test.csv', index=False)
-    y_test.to_csv('y_test.csv', index=False)
-    
-    list_files = ['dataset.csv', 'X_train.csv', 'y_train.csv', 'X_test.csv', 'y_test.csv']
-    with zipfile.ZipFile('dataset.zip', 'w') as zipF:
-        for file in list_files:
-            zipF.write(file, compress_type=zipfile.ZIP_DEFLATED)
-
-    with open('dataset.zip', 'rb') as datazip:
-        btn = st.download_button(
-                label='Download ZIP',
-                data=datazip,
-                file_name="dataset.zip",
-                mime="application/octet-stream"
-                )
-    
-    # Display model parameters
-    st.header('Model parameters', divider='rainbow')
-    parameters_col = st.columns(3)
-    parameters_col[0].metric(label="Data split ratio (% for Training Set)", value=parameter_split_size, delta="")
-    parameters_col[1].metric(label="Number of estimators (n_estimators)", value=parameter_n_estimators, delta="")
-    parameters_col[2].metric(label="Max features (max_features)", value=parameter_max_features_metric, delta="")
-    
-    # Display feature importance plot
-    importances = rf.feature_importances_
-    feature_names = list(X.columns)
-    forest_importances = pd.Series(importances, index=feature_names)
-    df_importance = forest_importances.reset_index().rename(columns={'index': 'feature', 0: 'value'})
-    
-    bars = alt.Chart(df_importance).mark_bar(size=40).encode(
-             x='value:Q',
-             y=alt.Y('feature:N', sort='-x')
-           ).properties(height=250)
-
-    performance_col = st.columns((2, 0.2, 3))
-    with performance_col[0]:
-        st.header('Model performance', divider='rainbow')
-        st.dataframe(rf_results.T.reset_index().rename(columns={'index': 'Parameter', 0: 'Value'}))
-    with performance_col[2]:
-        st.header('Feature importance', divider='rainbow')
-        st.altair_chart(bars, theme='streamlit', use_container_width=True)
-
-    # Prediction results
-    st.header('Prediction results', divider='rainbow')
-    s_y_train = pd.Series(y_train, name='actual').reset_index(drop=True)
-    s_y_train_pred = pd.Series(y_train_pred, name='predicted').reset_index(drop=True)
-    df_train = pd.DataFrame(data=[s_y_train, s_y_train_pred], index=None).T
-    df_train['class'] = 'train'
-        
-    s_y_test = pd.Series(y_test, name='actual').reset_index(drop=True)
-    s_y_test_pred = pd.Series(y_test_pred, name='predicted').reset_index(drop=True)
-    df_test = pd.DataFrame(data=[s_y_test, s_y_test_pred], index=None).T
-    df_test['class'] = 'test'
-    
-    df_prediction = pd.concat([df_train, df_test], axis=0)
-    
-    prediction_col = st.columns((2, 0.2, 3))
-    
-    # Display dataframe
-    with prediction_col[0]:
-        st.dataframe(df_prediction, height=320, use_container_width=True)
-
-    # Display scatter plot of actual vs predicted values
-    with prediction_col[2]:
-        scatter = alt.Chart(df_prediction).mark_circle(size=60).encode(
-                        x='actual',
-                        y='predicted',
-                        color='class'
-                  )
-        st.altair_chart(scatter, theme='streamlit', use_container_width=True)
-
-    
-# Ask for CSV upload if none is detected
-else:
-    st.warning('👈 Upload a CSV file or click *"Load example data"* to get started!')
+# Spliting the data into training and testing sets.
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.3, random_state = 42)
+a=st.sidebar.title('Explorarty Data Anylsis')
+aa=st.sidebar.checkbox('show raw data')
+aaa=st.sidebar.header('scatter')
+aaaa=st.sidebar.multiselect('x',['RI','Na', 'Mg', 'Al', 'Si', 'K', 'Ca', 'Ba', 'Fe'])
+aaaaaaa=st.sidebar.header('magicx')
+aaaaaaaa=st.sidebar.multiselect('xxx',['RI','Na', 'Mg', 'Al', 'Si', 'K', 'Ca', 'Ba', 'Fe'])
+magicmultiselc=st.sidebar.multiselect('magic',['hist','box','count','pychart','heat','bearplot'])
+magicselect=st.sidebar.selectbox('classifier',('svm','rfc','lr'))
+predictbutton=st.sidebar.button('predict')
+for i in aaaa:
+    st.subheader(i,' and glass type')
+    f=pc.scatter(glass_df,x=i,y='GlassType')
+    st.plotly_chart(f)
+for ii in magicmultiselc:
+    for iii in aaaaaaaa:
+        if ii =='hist':
+            st.subheader([ii,' plot for ',iii,' coloumn'])
+            plt.hist(glass_df[iii])
+            st.pyplot()
+        elif ii =='box':
+            st.subheader([ii,' plot for ',iii,' coloumn'])
+            sns.boxplot(glass_df[iii])
+            st.pyplot()
+        elif ii =='count':
+            st.subheader([ii,' plot for ',iii,' coloumn'])
+            sns.countplot(glass_df,x='GlassType')
+            st.pyplot()
+        elif ii =='pychart':
+            st.subheader([ii,' plot for ',iii,' coloumn'])
+            plt.pie(glass_df['GlassType'].value_counts())
+            st.pyplot()
+        elif ii =='heat':
+            st.subheader([ii, ' plot for ', iii, ' coloumn'])
+            sns.heatmap(glass_df.corr(),annot=True)
+            st.pyplot()
+        elif ii =='bearplot':
+            st.subheader([ii,' plot for ',iii,' coloumn'])
+            sns.pairplot(glass_df)
+            st.pyplot()
+if aa:
+    st.subheader('full data set')
+    st.dataframe(glass_df)
+if magicselect=='svm':
+    c=st.sidebar.number_input('c value', 0.01, 100.00,step=0.01)
+    g=st.sidebar.number_input('gamma value', 0.01, 100.00, step=0.01)
+    k=st.sidebar.radio('kernel', ('linear','poly','rbf'))
+    if predictbutton:
+        model=SVC(kernel=k,C=c,gamma=g)
+        model.fit(X_train,y_train)
+        st.header(('model score',model.score(X_test,y_test)))
+        plot_confusion_matrix(model,X_test,y_test)
+        st.pyplot()
+        st.header(('glass type is ',preiction(model,sliders[0],sliders[1],sliders[2],sliders[3],sliders[4],sliders[5],sliders[6],sliders[7],sliders[8])))
+elif magicselect=='rfc':
+    nest=st.sidebar.number_input('nest value', 100, 5000,step=10)
+    maxdepths=st.sidebar.number_input('maxdepth value', 1, 100, step=1)
+    if predictbutton:
+        model=RandomForestClassifier(n_estimators=nest,max_depth=maxdepths,n_jobs=-1)
+        model.fit(X_train,y_train)
+        st.header(('model score',model.score(X_test,y_test)))
+        plot_confusion_matrix(model,X_test,y_test)
+        st.pyplot()
+        st.header(('glass type is ',preiction(model,sliders[0],sliders[1],sliders[2],sliders[3],sliders[4],sliders[5],sliders[6],sliders[7],sliders[8])))
+elif magicselect=='lr':
+    c=st.sidebar.number_input('c value',1,100,step=1)
+    maxit = st.sidebar.number_input('max iteration value', 10, 1000, step=10)
+    if predictbutton:
+        model=LogisticRegression(C=c,max_iter=maxit)
+        model.fit(X_train,y_train)
+        st.header(('model score', model.score(X_test, y_test)))
+        plot_confusion_matrix(model, X_test, y_test)
+        st.pyplot()
+        st.header(('glass type is ',preiction(model, sliders[0], sliders[1], sliders[2], sliders[3], sliders[4], sliders[5], sliders[6],sliders[7], sliders[8])))
